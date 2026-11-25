@@ -485,3 +485,6 @@ $RECYCLE.BIN/
 
 # Generated test data
 data/
+
+# Project folder ends in .App, which *.app would otherwise ignore
+!src/OrderProcessor.App/
