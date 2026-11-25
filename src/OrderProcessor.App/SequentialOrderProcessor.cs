@@ -22,19 +22,7 @@ public sealed class SequentialOrderProcessor(ProductApiClient client)
                 continue;
             }
 
-            var lookup = client.Get(order!.ProductId);
-            switch (lookup.Status)
-            {
-                case ProductLookupStatus.Found:
-                    report.AddProcessed(new ProcessedOrder(order, order.Quantity * lookup.Price));
-                    break;
-                case ProductLookupStatus.NotFound:
-                    report.AddFailed(new FailedOrder(order.OrderId, FailureCategory.UnknownProduct, order.ProductId));
-                    break;
-                default:
-                    report.AddFailed(new FailedOrder(order.OrderId, FailureCategory.ApiError, lookup.Detail));
-                    break;
-            }
+            report.AddResult(order!, client.Get(order!.ProductId));
         }
 
         return report;

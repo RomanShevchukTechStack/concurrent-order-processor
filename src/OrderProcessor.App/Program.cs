@@ -2,7 +2,7 @@ using OrderProcessor.App;
 
 // Usage:
 //   generate [--rows 5000] [--seed 42] [--output data/orders.csv]
-//   process  [--mode sync] [--input data/orders.csv] [--api http://localhost:5080]
+//   process  [--mode sync|async] [--input data/orders.csv] [--api http://localhost:5080]
 //            [--timeout-ms 5000] [--report data/report.txt]
 var command = args.FirstOrDefault();
 var options = ParseOptions(args.Skip(1));
@@ -18,7 +18,7 @@ switch (command)
         break;
 
     case "process":
-        return RunProcess(options);
+        return await RunProcess(options);
 
     default:
         Console.Error.WriteLine("Commands: generate, process");
@@ -27,12 +27,12 @@ switch (command)
 
 return 0;
 
-static int RunProcess(Dictionary<string, string> options)
+static async Task<int> RunProcess(Dictionary<string, string> options)
 {
     var mode = options.GetValueOrDefault("mode", "sync");
-    if (mode != "sync")
+    if (mode is not ("sync" or "async"))
     {
-        Console.Error.WriteLine($"Mode '{mode}' is not supported yet. Available: sync");
+        Console.Error.WriteLine($"Mode '{mode}' is not supported yet. Available: sync, async");
         return 1;
     }
 
@@ -47,7 +47,10 @@ static int RunProcess(Dictionary<string, string> options)
         Timeout = TimeSpan.FromMilliseconds(timeoutMs),
     };
 
-    var report = new SequentialOrderProcessor(new ProductApiClient(http)).Process(input);
+    var client = new ProductApiClient(http);
+    var report = mode == "sync"
+        ? new SequentialOrderProcessor(client).Process(input)
+        : await new AsyncOrderProcessor(client).ProcessAsync(input);
     var text = report.ToText();
 
     var reportDirectory = Path.GetDirectoryName(Path.GetFullPath(reportPath));

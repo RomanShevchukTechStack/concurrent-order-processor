@@ -13,37 +13,73 @@ public sealed class ProductApiClient(HttpClient http)
     {
         try
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"products/{Uri.EscapeDataString(productId)}");
+            using var request = CreateRequest(productId);
             using var response = http.Send(request);
 
-            if (response.StatusCode == HttpStatusCode.NotFound)
+            var byStatus = FromStatus(response);
+            if (byStatus is not null)
             {
-                return ProductLookup.NotFound();
-            }
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return ProductLookup.Error($"HTTP {(int)response.StatusCode}");
+                return byStatus;
             }
 
             using var stream = response.Content.ReadAsStream();
-            var product = JsonSerializer.Deserialize<ProductDto>(stream, JsonOptions);
-            return product is null
-                ? ProductLookup.Error("empty response body")
-                : ProductLookup.Found(product.Price);
+            return FromBody(JsonSerializer.Deserialize<ProductDto>(stream, JsonOptions));
         }
-        catch (TaskCanceledException)
+        catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or JsonException)
         {
-            // HttpClient.Timeout surfaces as a canceled task.
-            return ProductLookup.Error("timeout");
-        }
-        catch (HttpRequestException ex)
-        {
-            return ProductLookup.Error($"request failed: {ex.Message}");
-        }
-        catch (JsonException ex)
-        {
-            return ProductLookup.Error($"bad response body: {ex.Message}");
+            return FromException(ex);
         }
     }
+
+    /// <summary>Non-blocking call, same results as <see cref="Get"/>.</summary>
+    public async Task<ProductLookup> GetAsync(string productId)
+    {
+        try
+        {
+            using var request = CreateRequest(productId);
+            using var response = await http.SendAsync(request);
+
+            var byStatus = FromStatus(response);
+            if (byStatus is not null)
+            {
+                return byStatus;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync();
+            return FromBody(await JsonSerializer.DeserializeAsync<ProductDto>(stream, JsonOptions));
+        }
+        catch (Exception ex) when (ex is TaskCanceledException or HttpRequestException or JsonException)
+        {
+            return FromException(ex);
+        }
+    }
+
+    private static HttpRequestMessage CreateRequest(string productId) =>
+        new(HttpMethod.Get, $"products/{Uri.EscapeDataString(productId)}");
+
+    /// <summary>Returns a result for 404 and error statuses, or null when the body must be read.</summary>
+    private static ProductLookup? FromStatus(HttpResponseMessage response)
+    {
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return ProductLookup.NotFound();
+        }
+
+        return response.IsSuccessStatusCode
+            ? null
+            : ProductLookup.Error($"HTTP {(int)response.StatusCode}");
+    }
+
+    private static ProductLookup FromBody(ProductDto? product) =>
+        product is null
+            ? ProductLookup.Error("empty response body")
+            : ProductLookup.Found(product.Price);
+
+    private static ProductLookup FromException(Exception ex) => ex switch
+    {
+        // HttpClient.Timeout surfaces as a canceled task.
+        TaskCanceledException => ProductLookup.Error("timeout"),
+        HttpRequestException => ProductLookup.Error($"request failed: {ex.Message}"),
+        _ => ProductLookup.Error($"bad response body: {ex.Message}"),
+    };
 }

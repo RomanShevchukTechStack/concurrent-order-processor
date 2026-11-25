@@ -18,6 +18,23 @@ public sealed class ProcessingReport
 
     public void AddFailed(FailedOrder order) => _failed.Add(order);
 
+    /// <summary>Records an order as processed or failed, based on the product lookup result.</summary>
+    public void AddResult(Order order, ProductLookup lookup)
+    {
+        switch (lookup.Status)
+        {
+            case ProductLookupStatus.Found:
+                AddProcessed(new ProcessedOrder(order, order.Quantity * lookup.Price));
+                break;
+            case ProductLookupStatus.NotFound:
+                AddFailed(new FailedOrder(order.OrderId, FailureCategory.UnknownProduct, order.ProductId));
+                break;
+            default:
+                AddFailed(new FailedOrder(order.OrderId, FailureCategory.ApiError, lookup.Detail));
+                break;
+        }
+    }
+
     /// <summary>Text summary. Same input and same API behavior give the same text.</summary>
     public string ToText()
     {
