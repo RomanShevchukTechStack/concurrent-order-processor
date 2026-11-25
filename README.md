@@ -30,9 +30,39 @@ version are done.** Cancellation, concurrency and the performance investigation 
 | `benchmarks/` | Saved measurements (`results.csv`, `README.md` table) |
 | `data/` | Generated input and reports (not committed) |
 
-## Run
+## Quick start
 
-All commands are run from the repository root.
+Run all commands from the repository root. You need two terminals.
+
+**Terminal 1: start the API** (leave it running)
+
+```
+dotnet run --project src/OrderProcessor.Api -- --urls http://localhost:5080
+```
+
+**Terminal 2: generate orders and process them**
+
+```
+dotnet run --project src/OrderProcessor.App -- generate
+dotnet run --project src/OrderProcessor.App -- process --mode sync
+dotnet run --project src/OrderProcessor.App -- process --mode async
+```
+
+With the default settings (no delay, no errors) each run takes a few seconds. Expected result for
+the default data (5,000 rows, seed 42):
+
+```
+Processed orders: 4705
+Failed orders: 295
+  InvalidRow: 145
+  UnknownProduct: 150
+Grand total: 2082242.16
+```
+
+The same report is saved to `data/report.txt`. To check the code, run `dotnet test`.
+To measure sync against async, see "Measure and save results" below.
+
+## Run in detail
 
 ### 1. Generate orders
 
@@ -86,6 +116,16 @@ Add `--measure true` to `process` to record time, allocations and GC counts and 
 ```
 dotnet test
 ```
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| Every valid order is an `ApiError` ("request failed" or "timeout") | The API is not running or the port differs. Start it, or pass `--api http://localhost:<port>` to `process` |
+| `address already in use` when starting the API | Port 5080 is taken. Stop the other process or use another port in `--urls` and `--api` |
+| `Could not find file ... orders.csv` | Run `generate` first, or pass `--input` |
+| Failures differ between two runs with the same settings | Restart the API between runs. The failure pattern depends on how often each product was requested before |
+| Benchmark script cannot run | Run it from PowerShell. If scripts are blocked, use `powershell -ExecutionPolicy Bypass -File scripts/run-benchmark.ps1` |
 
 ## Measurements
 
