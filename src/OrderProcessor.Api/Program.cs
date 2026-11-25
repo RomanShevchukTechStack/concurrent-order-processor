@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using OrderProcessor.Api;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,6 +31,9 @@ app.MapGet("/products/{id}", async (string id, FailureSimulator simulator, Cance
         ? Results.Ok(product)
         : Results.NotFound();
 });
+
+// Lets the client record the exact simulation settings next to its measurements.
+app.MapGet("/simulation", (IOptions<SimulationOptions> options) => Results.Ok(options.Value));
 
 app.Run();
 

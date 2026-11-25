@@ -30,3 +30,5 @@ public sealed record ProductLookup(ProductLookupStatus Status, decimal Price = 0
 
     public static ProductLookup Error(string detail) => new(ProductLookupStatus.Error, Detail: detail);
 }
+
+public sealed record SimulationInfo(int DelayMs, double ErrorRate, int Seed, int TimeoutMs);

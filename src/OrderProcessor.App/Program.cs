@@ -1,9 +1,13 @@
+using System.Globalization;
+using System.Net.Http.Json;
+using System.Text.Json;
 using OrderProcessor.App;
 
 // Usage:
 //   generate [--rows 5000] [--seed 42] [--output data/orders.csv]
 //   process  [--mode sync|async] [--input data/orders.csv] [--api http://localhost:5080]
 //            [--timeout-ms 5000] [--report data/report.txt]
+//            [--measure true] [--benchmarks-dir benchmarks]
 var command = args.FirstOrDefault();
 var options = ParseOptions(args.Skip(1));
 
@@ -40,6 +44,7 @@ static async Task<int> RunProcess(Dictionary<string, string> options)
     var api = options.GetValueOrDefault("api", "http://localhost:5080");
     var timeoutMs = int.Parse(options.GetValueOrDefault("timeout-ms", "5000"));
     var reportPath = options.GetValueOrDefault("report", Path.Combine("data", "report.txt"));
+    var measure = options.GetValueOrDefault("measure", "false") == "true";
 
     using var http = new HttpClient
     {
@@ -48,11 +53,15 @@ static async Task<int> RunProcess(Dictionary<string, string> options)
     };
 
     var client = new ProductApiClient(http);
+    var scope = measure ? MeasurementScope.Start() : null;
+
     var report = mode == "sync"
         ? new SequentialOrderProcessor(client).Process(input)
         : await new AsyncOrderProcessor(client).ProcessAsync(input);
-    var text = report.ToText();
 
+    var measurement = scope?.Stop();
+
+    var text = report.ToText();
     var reportDirectory = Path.GetDirectoryName(Path.GetFullPath(reportPath));
     if (reportDirectory is not null)
     {
@@ -62,7 +71,55 @@ static async Task<int> RunProcess(Dictionary<string, string> options)
     File.WriteAllText(reportPath, text);
     Console.WriteLine(text);
     Console.WriteLine($"Report written to {Path.GetFullPath(reportPath)}");
+
+    if (measurement is not null)
+    {
+        await SaveBenchmark(options, http, mode, report, measurement);
+    }
+
     return 0;
+}
+
+static async Task SaveBenchmark(
+    Dictionary<string, string> options,
+    HttpClient http,
+    string mode,
+    ProcessingReport report,
+    Measurement measurement)
+{
+    // Read the API's own settings so they are recorded exactly, not typed in by hand.
+    SimulationInfo? simulation = null;
+    try
+    {
+        simulation = await http.GetFromJsonAsync<SimulationInfo>(
+            "simulation", new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    }
+    catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+    {
+        Console.Error.WriteLine($"Could not read API settings: {ex.Message}");
+    }
+
+    var directory = options.GetValueOrDefault("benchmarks-dir", "benchmarks");
+    var row = new BenchmarkRow(
+        DateTime.UtcNow,
+        BenchmarkStore.DescribeCommit(),
+        mode,
+        report.Processed.Count + report.Failed.Count,
+        simulation?.DelayMs.ToString(CultureInfo.InvariantCulture) ?? "unknown",
+        simulation?.ErrorRate.ToString(CultureInfo.InvariantCulture) ?? "unknown",
+        simulation?.Seed.ToString(CultureInfo.InvariantCulture) ?? "unknown",
+        Concurrency: 1,
+        measurement,
+        report.Processed.Count,
+        report.Failed.Count,
+        report.GrandTotal);
+
+    BenchmarkStore.Append(directory, row);
+    Console.WriteLine(
+        $"Measured: {measurement.ElapsedMs} ms, peak {measurement.PeakWorkingSetMb:F1} MB, " +
+        $"allocated {measurement.AllocatedMb:F1} MB, " +
+        $"GC {measurement.Gen0Collections}/{measurement.Gen1Collections}/{measurement.Gen2Collections}");
+    Console.WriteLine($"Saved to {Path.GetFullPath(directory)}");
 }
 
 static Dictionary<string, string> ParseOptions(IEnumerable<string> args)
